@@ -4,13 +4,13 @@ Run: streamlit run app.py
 """
 
 import streamlit as st
-import os
 import sys
+import os
 
-# ─── Import pipeline ───────────────────────────────────────────────
-sys.path.insert(0, os.path.dirname(__file__))
-import importlib
-smp = importlib.import_module("stress_model_pipeline")
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+
+import stress_model_pipeline as smp
 
 
 # ════════════════════════════════════════════════════════════════════
