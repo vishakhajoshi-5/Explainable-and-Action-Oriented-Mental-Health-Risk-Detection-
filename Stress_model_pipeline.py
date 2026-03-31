@@ -252,38 +252,43 @@ def train_and_evaluate(df: pd.DataFrame) -> tuple:
     return best['pipeline'], best_name, X_test, y_test
 
 
+
 # ════════════════════════════════════════════════════════════════════════════
-# STEP 6 — Explainability Layer (SHAP or fallback)
+# STEP 6 — Explainability Layer (FIXED VERSION)
 # ════════════════════════════════════════════════════════════════════════════
+
 def get_top_words_shap(pipeline, text: str, n: int = 5) -> list[dict]:
     """
-    Returns top N words that influenced the prediction using SHAP.
-    Works with Logistic Regression pipelines.
+    Improved SHAP explainability with better word matching
     """
     tfidf = pipeline.named_steps['tfidf']
     clf   = pipeline.named_steps['clf']
 
-    # Transform single text
     X_vec = tfidf.transform([text])
 
     explainer = shap.LinearExplainer(clf, X_vec, feature_perturbation="interventional")
-    shap_vals  = explainer.shap_values(X_vec)
+    shap_vals = explainer.shap_values(X_vec)
 
-    # shap_vals shape: (1, n_features) for binary
     if isinstance(shap_vals, list):
-        vals = shap_vals[1][0]   # class 1 (stress)
+        vals = shap_vals[1][0]
     else:
         vals = shap_vals[0]
 
     feature_names = tfidf.get_feature_names_out()
-    word_shap     = list(zip(feature_names, vals))
+    word_shap = list(zip(feature_names, vals))
 
-    # Filter to words actually present in the input
-    present = set(text.lower().split())
-    word_shap = [(w, v) for w, v in word_shap if w in present]
+    # 🔥 NEW: Partial matching instead of exact matching
+    cleaned_words = set(text.lower().split())
 
-    # Sort by absolute impact
-    word_shap.sort(key=lambda x: abs(x[1]), reverse=True)
+    filtered = []
+    for w, v in word_shap:
+        for token in cleaned_words:
+            if token in w:   # partial match
+                filtered.append((w, v))
+                break
+
+    # Sort by importance
+    filtered.sort(key=lambda x: abs(x[1]), reverse=True)
 
     return [
         {
@@ -291,21 +296,19 @@ def get_top_words_shap(pipeline, text: str, n: int = 5) -> list[dict]:
             'impact': float(v),
             'direction': 'increases stress' if v > 0 else 'reduces stress'
         }
-        for w, v in word_shap[:n]
+        for w, v in filtered[:n]
     ]
 
 
 def get_top_words_coef(pipeline, text: str, n: int = 5) -> list[dict]:
     """
-    Fallback explainability using logistic regression coefficients.
-    Works when SHAP is not installed.
+    Improved fallback explainability using coefficients
     """
     tfidf = pipeline.named_steps['tfidf']
     clf   = pipeline.named_steps['clf']
 
     feature_names = tfidf.get_feature_names_out()
 
-    # Get coefficients (works for LR; for RF use feature_importances_)
     if hasattr(clf, 'coef_'):
         coefs = clf.coef_[0]
     elif hasattr(clf, 'feature_importances_'):
@@ -318,11 +321,14 @@ def get_top_words_coef(pipeline, text: str, n: int = 5) -> list[dict]:
     cleaned_text = clean_reddit_text(text, max_words=200)
     present_words = set(cleaned_text.split())
 
-    scored = [
-        (w, word_to_coef[w])
-        for w in present_words
-        if w in word_to_coef
-    ]
+    # 🔥 NEW: Partial matching
+    scored = []
+    for feature, coef in word_to_coef.items():
+        for word in present_words:
+            if word in feature:
+                scored.append((feature, coef))
+                break
+
     scored.sort(key=lambda x: abs(x[1]), reverse=True)
 
     return [
@@ -337,19 +343,15 @@ def get_top_words_coef(pipeline, text: str, n: int = 5) -> list[dict]:
 
 def explain_prediction(pipeline, raw_text: str, n: int = 5) -> dict:
     """
-    Full prediction + explanation for a single input text.
-    Returns:
-        label       : 'HIGH STRESS' or 'LOW STRESS'
-        confidence  : float 0–1
-        top_words   : list of {word, impact, direction}
-        explanation : human-readable string
+    Improved explanation system
     """
     cleaned = clean_reddit_text(raw_text)
 
-    pred    = pipeline.predict([cleaned])[0]
-    prob    = pipeline.predict_proba([cleaned])[0]
-    conf    = float(prob[pred])
-    label   = 'HIGH STRESS' if pred == 1 else 'LOW STRESS'
+    pred = pipeline.predict([cleaned])[0]
+    prob = pipeline.predict_proba([cleaned])[0]
+    conf = float(prob[pred])
+
+    label = 'HIGH STRESS' if pred == 1 else 'LOW STRESS'
 
     # Choose explainability method
     try:
@@ -361,23 +363,29 @@ def explain_prediction(pipeline, raw_text: str, n: int = 5) -> dict:
         print(f"Explainability warning: {e}")
         top_words = get_top_words_coef(pipeline, cleaned, n)
 
-    # Build human-readable explanation
-    stress_words    = [w['word'] for w in top_words if w['direction'] == 'increases stress']
+    # 🔥 NEW: Better explanation logic
+    stress_words = [w['word'] for w in top_words if w['direction'] == 'increases stress']
     nonstress_words = [w['word'] for w in top_words if w['direction'] == 'reduces stress']
 
+    explanation = ""
+
     if stress_words:
-        explanation = f"Words like \"{', '.join(stress_words[:3])}\" strongly indicate stress."
-    elif nonstress_words:
-        explanation = f"Words like \"{', '.join(nonstress_words[:3])}\" suggest a calm tone."
-    else:
-        explanation = "Based on the overall pattern of your text."
+        explanation += f"Stress indicators detected: {', '.join(stress_words[:3])}. "
+
+    if nonstress_words:
+        explanation += f"Positive indicators detected: {', '.join(nonstress_words[:3])}. "
+
+    if not explanation:
+        explanation = "The model used overall language patterns but no strong keywords were detected."
 
     return {
-        'label'      : label,
-        'confidence' : round(conf * 100, 1),
-        'top_words'  : top_words,
-        'explanation': explanation,
+        'label': label,
+        'confidence': round(conf * 100, 1),
+        'top_words': top_words,
+        'explanation': explanation.strip(),
     }
+
+
 
 
 # ════════════════════════════════════════════════════════════════════════════
