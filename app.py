@@ -78,9 +78,9 @@ model = load_pipeline()
 # ════════════════════════════════════════════════════════════════════
 # UI Design
 # ════════════════════════════════════════════════════════════════════
-st.set_page_config(page_title="Stress Detector", page_icon="🧠")
+st.set_page_config(page_title="Stress Detector")
 
-st.title("🧠 Mental Health Risk Detector")
+st.title("Mental Health Risk Detector")
 st.caption("Explainable + Action-Oriented Stress Detection System")
 
 user_input = st.text_area(
@@ -112,13 +112,13 @@ if st.button("Analyze"):
 
         # ── Top Words ─────────────────────────────────
         if top_words:
-            st.subheader("🧠 Key Influencing Words")
+            st.subheader("Key Influencing Words")
             for w in top_words:
                 emoji = "🔴" if w['direction'] == 'increases stress' else "🟢"
                 st.write(f"{emoji} {w['word']} → {w['direction']}")
 
         # ── Suggestions ───────────────────────────────
-        st.subheader("💡 What you can do")
+        st.subheader("What you can do")
 
         suggestions = get_suggestions(label, top_words)
 
